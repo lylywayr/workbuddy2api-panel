@@ -348,6 +348,52 @@ func applyModelInfoFields(entry map[string]any, mi upstream.ModelInfo) map[strin
 	if mi.Credits != "" {
 		entry["credits"] = mi.Credits // 积分倍率原文（如 "x0.05"），仅展示
 	}
+	// 限时优惠（modelPromotions）：credits 是牌价，promo_* 是当前生效折扣。
+	// 必须透出到 OpenAI 兼容的 /v1/models——远端客户端（子代理路由、CLI 工具）
+	// 只读这个接口，看不到 promo 就会按牌价误判模型成本。
+	// promo_active=true 仅表示「折扣已被 machine-readable 证实生效」（条目带
+	// discount.factor）；badge-only 条目为 false，真实时段在 promo_note 里。
+	if mi.PromoLabel != "" {
+		entry["promo_label"] = mi.PromoLabel
+		// 有标签就显式给布尔值：缺字段会让客户端把「不确定」当成「无折扣」，
+		// 与 false 语义不同。false 表示「活动存在但当前无可证实的折扣」。
+		entry["promo_active"] = mi.PromoActive
+	}
+	if mi.PromoNote != "" {
+		entry["promo_note"] = mi.PromoNote
+	}
+	if mi.PromoFactor != nil {
+		entry["promo_factor"] = *mi.PromoFactor
+	}
+	if mi.PromoCredits != "" {
+		entry["promo_credits"] = mi.PromoCredits
+	}
+	if mi.PromoWindow != "" {
+		entry["promo_window"] = mi.PromoWindow
+	}
+	if mi.PromoWindowKind != "" {
+		entry["promo_window_kind"] = mi.PromoWindowKind
+	}
+	if mi.PromoPeakWindow != "" {
+		entry["promo_peak_window"] = mi.PromoPeakWindow
+	}
+	if mi.PromoWeekdaysOnly {
+		entry["promo_weekdays_only"] = true
+	}
+	if mi.PromoDerived {
+		// 值由 hover 文案派生：官方改时段会自动跟随，但置信度低于上游
+		// machine-readable 字段，客户端可据此决定是否二次确认。
+		entry["promo_derived"] = true
+	}
+	if mi.PromoValidFrom != "" {
+		entry["promo_valid_from"] = mi.PromoValidFrom
+	}
+	if mi.PromoValidUntil != "" {
+		entry["promo_valid_until"] = mi.PromoValidUntil
+	}
+	if mi.PromoTimezone != "" {
+		entry["promo_timezone"] = mi.PromoTimezone
+	}
 	if len(mi.Tags) > 0 {
 		entry["tags"] = mi.Tags
 	}
