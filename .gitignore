@@ -19,6 +19,10 @@ config.json
 # Build artifacts
 *.tmp
 __pycache__/
+# 交叉编译产物（dist/wb2api-linux-{amd64,arm64}），按需重新编译，不进版本库
+/dist/
+# 编辑器/编译产生的备份文件，如 wb2api.exe~
+*~
 
 # Backups (contains auth tokens)
 backups/
