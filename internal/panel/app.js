@@ -255,6 +255,9 @@ function rateLimitMeta(row, now) {
   const until = parseAPITime(row && row.until);
   const deadline = resetAt || until;
   const remaining = deadline > now ? Math.round((deadline - now) / 1000) : 0;
+  // issue #241：detail 原为隐式全局赋值，'use strict' 下抛 ReferenceError，
+  // 导致 renderAccounts 的 innerHTML 整体中断、账号池表与模型锁池表双双空白。
+  let detail;
   if (kind === 'model_unavailable') {
     return {
       model,
