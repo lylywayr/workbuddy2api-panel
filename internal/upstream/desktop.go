@@ -379,9 +379,28 @@ type MarketExpert struct {
 // MarketExpertList 拉取专家市场真实专家列表（expertType: "agent" 单专家 / "team" 专家团）。
 // expert_actual_use 的判据校验要求 id 是平台上真实存在的专家（编造 id 不计数）。
 func (c *Client) MarketExpertList(a *auth.Auth, expertType string) ([]MarketExpert, error) {
-	body := map[string]any{"page": 1, "page_size": 20, "sort_by": "reco_rank", "sort_order": "desc"}
+	return c.marketExpertList(a, expertType, "")
+}
+
+// MarketExpertListByKeyword 按关键词搜索专家市场。
+// 实测：keyword 参数有效；page_size 上限 100（传更大仍只回 100）；全库 2.5 万+ 专家，
+// 故「按 id 全量扫描」不可行，只能靠 keyword 缩小范围再按 expert_id 精确匹配。
+//
+// 用途：活动任务的标题用的是「包装名」，与市场里的 display_name_zh 不一致
+// （如任务写「抖音策略师」，市场实名「斗音音」），按标题搜不中；
+// 但任务 jump_url 里的 expertId 是准确的——用本方法拿完整对象后按 id 比对。
+func (c *Client) MarketExpertListByKeyword(a *auth.Auth, expertType, keyword string) ([]MarketExpert, error) {
+	return c.marketExpertList(a, expertType, keyword)
+}
+
+// marketExpertList 专家市场列表的公共实现；keyword 为空即默认推荐流。
+func (c *Client) marketExpertList(a *auth.Auth, expertType, keyword string) ([]MarketExpert, error) {
+	body := map[string]any{"page": 1, "page_size": 100, "sort_by": "reco_rank", "sort_order": "desc"}
 	if expertType != "" {
 		body["expert_type"] = expertType
+	}
+	if keyword != "" {
+		body["keyword"] = keyword
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

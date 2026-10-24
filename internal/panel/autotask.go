@@ -1001,6 +1001,158 @@ func runExpertLighthouse(p *Panel, a *auth.Auth) (string, error) {
 	return "已上报轻量云专家召唤+使用链（真实对话 requestId）", nil
 }
 
+// ---------------------------------------------------------------------------
+// 活动任务：体验指定 expertId 的专家（2026-10-24 新增）
+// ---------------------------------------------------------------------------
+
+// activityExpertActions 「体验某专家」类活动任务的注册表。
+//
+// 判据与 expert_5 同源：召唤链事件 → 真实对话（服务端 requestId）→ expert_actual_use。
+// 差别只在专家由 expertId 指定，而非「从市场推荐流取前 N 个」。
+//
+// expert_id 取自任务 jump_url 的 deeplink（实测准确）；DisplayNameZH 等元数据取自
+// 2026-10-24 市场查询，运行时若市场返回同 id 条目则以其为准（version/categories
+// 可能随上游更新）。注意**任务标题用的是包装名，与市场 display_name_zh 不一致**：
+// 「抖音策略师」⇒ 斗音音、「直播电商教练」⇒ 播旺旺、「商家宣传页与海报设计师」⇒
+// 商家宣传设计师、「中国电商运营专家」⇒ 卖得好。按标题搜索永远搜不到，必须按 id 匹配。
+var activityExpertActions = []struct {
+	TaskCode string
+	Desc     string
+	Expert   upstream.MarketExpert
+	Keyword  string // 市场搜索词（仅用于定位完整条目）
+}{
+	{
+		TaskCode: "expert_use_maidehao",
+		Desc:     "体验「中国电商运营专家」：召唤 + 真实对话",
+		Expert: upstream.MarketExpert{
+			ExpertID: "ex_GDl31WahyIH0", ExpertType: "agent",
+			DisplayNameZH: "卖得好", ProfessionZH: "中国电商运营专家", Version: "1.0.1",
+			Categories: []any{"05-MarketingGrowth", "18-Double11"},
+		},
+		Keyword: "中国电商运营",
+	},
+	{
+		TaskCode: "expert_use_douyinyin",
+		Desc:     "体验「抖音策略师」：召唤 + 真实对话",
+		Expert: upstream.MarketExpert{
+			ExpertID: "ex_FbY5nlWTqDod", ExpertType: "agent",
+			DisplayNameZH: "斗音音", ProfessionZH: "抖音策略师", Version: "1.0.2",
+			Categories: []any{"06-ContentCreative", "18-Double11"},
+		},
+		Keyword: "抖音策略师",
+	},
+	{
+		TaskCode: "expert_use_shangjia_xuanchuan",
+		Desc:     "体验「商家宣传页与海报设计师」：召唤 + 真实对话",
+		Expert: upstream.MarketExpert{
+			ExpertID: "ex_Weo3x2EZuSDm", ExpertType: "agent",
+			DisplayNameZH: "商家宣传设计师", ProfessionZH: "商家宣传页与海报设计师", Version: "1.6.0",
+			Categories: []any{"01-ProductDesign", "05-MarketingGrowth", "18-Double11"},
+		},
+		Keyword: "海报设计师",
+	},
+	{
+		TaskCode: "expert_use_bowangwang",
+		Desc:     "体验「直播电商教练」：召唤 + 真实对话",
+		Expert: upstream.MarketExpert{
+			ExpertID: "ex_WZY136wV5aMt", ExpertType: "agent",
+			DisplayNameZH: "播旺旺", ProfessionZH: "直播电商教练", Version: "1.0.2",
+			Categories: []any{"05-MarketingGrowth", "18-Double11"},
+		},
+		Keyword: "直播电商",
+	},
+	{
+		TaskCode: "WorkBuddy_Valorant",
+		Desc:     "体验「无畏契约拼豆专家」：召唤 + 真实对话",
+		Expert: upstream.MarketExpert{
+			ExpertID: "ex_xQHHD1u5Jkua", ExpertType: "agent",
+			DisplayNameZH: "无畏契约拼豆专家", ProfessionZH: "无畏契约拼豆专家", Version: "1.2.3",
+			Categories: []any{"03-GameSpatial", "06-ContentCreative"},
+		},
+		Keyword: "无畏契约",
+	},
+}
+
+// init 把活动任务追加进 autoActions。
+// 追加在末尾即可：这些任务不依赖其他动作的前置（与 chat_5 → first_buddy 的链式
+// 依赖不同），且「一键完成」按表顺序执行，末尾不影响既有任务。
+func init() {
+	for _, e := range activityExpertActions {
+		e := e
+		autoActions = append(autoActions, autoAction{
+			TaskCode: e.TaskCode,
+			Desc:     e.Desc,
+			run: func(p *Panel, a *auth.Auth) (string, error) {
+				return runExpertActivity(p, a, e.Expert, e.Keyword)
+			},
+		})
+	}
+}
+
+// findMarketExpert 按 expertId 在专家市场定位完整条目。
+// 全库 2.5 万+ 专家且 page_size 上限 100，又没有「按 id 直查」接口（detail/info
+// 实测 404），故只能两级查找：推荐流前 100 → keyword 搜索。
+func (p *Panel) findMarketExpert(a *auth.Auth, expertID, keyword string) (upstream.MarketExpert, bool) {
+	if expertID == "" {
+		return upstream.MarketExpert{}, false
+	}
+	if list, err := p.cfg.Upstream.MarketExpertList(a, "agent"); err == nil {
+		for _, e := range list {
+			if e.ExpertID == expertID {
+				return e, true
+			}
+		}
+	}
+	if keyword == "" {
+		return upstream.MarketExpert{}, false
+	}
+	list, err := p.cfg.Upstream.MarketExpertListByKeyword(a, "agent", keyword)
+	if err != nil {
+		return upstream.MarketExpert{}, false
+	}
+	for _, e := range list {
+		if e.ExpertID == expertID {
+			return e, true
+		}
+	}
+	return upstream.MarketExpert{}, false
+}
+
+// expertMsgID 生成消息级 id；requestId 短于 8 位时不切片（防越界 panic）。
+func expertMsgID(req string) string {
+	if len(req) >= 8 {
+		return "msg-" + req[len(req)-8:]
+	}
+	return "msg-" + req
+}
+
+// runExpertActivity 完成「体验指定专家」：召唤链 → 真实对话 → 使用事件上报。
+// 与 runExpertBatch 用同一批 upstream 构造器，保证判据载荷完全一致。
+// accept 与 claim 由 runAutoAll 统一处理，此处只做行为链路。
+func runExpertActivity(p *Panel, a *auth.Auth, ex upstream.MarketExpert, keyword string) (string, error) {
+	// 市场条目优先（version/categories 以上游当前值为准）；查不到用内置元数据兜底。
+	if found, ok := p.findMarketExpert(a, ex.ExpertID, keyword); ok {
+		ex = found
+	}
+	if err := p.cfg.Upstream.ReportDesktopEvent(a, upstream.DesktopExpertSummonSequence(ex)...); err != nil {
+		return "", fmt.Errorf("召唤链: %w", err)
+	}
+	time.Sleep(reportGap)
+	conv, req, err := p.cfg.Upstream.DesktopChatWithExpert(a, ex.ExpertID)
+	if err != nil {
+		return "", fmt.Errorf("真实对话: %w", err)
+	}
+	time.Sleep(reportGap)
+	events := append(
+		upstream.DesktopChatSequence(conv, req, expertMsgID(req), "fast-model", "fast-model"),
+		upstream.DesktopExpertActualUseEvent(ex, conv, req),
+	)
+	if err := p.cfg.Upstream.ReportDesktopEvent(a, events...); err != nil {
+		return "", fmt.Errorf("使用事件: %w", err)
+	}
+	return fmt.Sprintf("已对「%s」完成召唤 + 真实对话 + 使用上报", ex.DisplayNameZH), nil
+}
+
 // runAppearance 完成 Hp_Appearance（换主题）。
 // 2026-09-12 紫川/人杰2 实测（desktopverify12）：判据是 appearance_skin_apply
 // 事件 {action:"apply",source:"settings_close",id:<resourceKey>,...}（客户端在
