@@ -38,13 +38,17 @@ func sessionTestScheduler(t *testing.T, switched bool) (*Scheduler, *recorderUps
 	return s, r
 }
 
-// TestEnterpriseSessionGateSkipsBehaviorTasks 企业切换会话的行为类任务门控：
-// /v2/report 等行为事件对该形态返回 200 却被上游静默丢弃（实测 2026-10-12，
-// 15 个成长任务全部 0/x 且 90s 内进度从不跳动），执行即零收益白跑——
-// 活跃上报 / 连登管家 / 猫猫旅行 / 夜猫子必须一个上游调用都不发；
-// 签到不在此列（对该形态未观测到静默失败，且失败是显式报错）。
-// 每个子用例配个人号对照，证明"没发请求"是门控生效而非构造有误。
-func TestEnterpriseSessionGateSkipsBehaviorTasks(t *testing.T) {
+// TestEnterpriseSwitchSessionNotGated 仅带 token_source=enterprise_switch、
+// enterpriseId 为空的**个人号**不参与行为任务门控。
+//
+// 口径修正（2026-10-24 实测）：原作者据 2026-10-12 观测把该声明当作企业上下文，
+// 认为 /v2/report 会被静默丢弃。issue #240 的双号对照 + 本次本机实测均否定这一点——
+// 这类账号成长任务照常计分（召唤+对话+上报后进度 0/1 → 1/1，+50 分实际到账）。
+// 该声明只记录「本次授权走了企业切换流程」，不代表账号处于企业上下文。
+//
+// 真正需要门控的是**真企业版**（enterpriseId 非空），见 TestEnterpriseGateSkipsGrowthTasks。
+// 每个子用例仍配个人号对照，确保"发了请求"不是构造失误造成的假阳性。
+func TestEnterpriseSwitchSessionNotGated(t *testing.T) {
 	// 与 TestEnterpriseGateSkipsGrowthTasks 同款：把夜猫子窗口钉在窗口内。
 	restoreClock := nowForNightWindow
 	nowForNightWindow = func() time.Time { return time.Date(2026, 10, 12, 23, 30, 0, 0, time.Local) }
@@ -53,16 +57,16 @@ func TestEnterpriseSessionGateSkipsBehaviorTasks(t *testing.T) {
 	cases := []struct {
 		name string
 		run  func(*Scheduler)
-		// endpoint 是该任务在**个人号**上必然发起的上游路径（对照组判据）。
+		// endpoint 是该任务在**个人号**上必然发起的上游路径。
 		endpoint string
 		// gated=true 期望切换会话不发该请求；false 期望照常发（不门控）。
 		gated bool
 	}{
 		{"签到", func(s *Scheduler) { s.RunCheckinNow() }, "/daily-checkin", false},
-		{"活跃上报", func(s *Scheduler) { s.RunActivityNow() }, "/v2/report", true},
-		{"猫猫旅行", func(s *Scheduler) { s.RunTravelNow() }, "/activity/growth/buddy/info", true},
-		{"夜猫子", func(s *Scheduler) { s.RunBlackcatNow() }, "/v2/activity/growth/tasks", true},
-		{"连登管家", func(s *Scheduler) { s.RunStreakBonusNow() }, "/activity/growth/streak", true},
+		{"活跃上报", func(s *Scheduler) { s.RunActivityNow() }, "/v2/report", false},
+		{"猫猫旅行", func(s *Scheduler) { s.RunTravelNow() }, "/activity/growth/buddy/info", false},
+		{"夜猫子", func(s *Scheduler) { s.RunBlackcatNow() }, "/v2/activity/growth/tasks", false},
+		{"连登管家", func(s *Scheduler) { s.RunStreakBonusNow() }, "/activity/growth/streak", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

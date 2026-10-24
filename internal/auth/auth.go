@@ -210,28 +210,28 @@ func (a *Auth) IsGlobal() bool { return a.Realm() == "global" }
 // 无需加锁——Realm() 加锁是因为 realm/Domain 会被 RefreshToken 在锁内改写。
 func (a *Auth) IsEnterprise() bool { return strings.TrimSpace(a.EnterpriseID) != "" }
 
-// IsEnterpriseSession 报告当前凭证是否处于「企业上下文」：
-// 账号本身是企业版（IsEnterprise），或 AccessToken 签发自**企业切换会话**
-// （JWT payload 带 token_source=enterprise_switch——浏览器在企业空间状态下
-// 完成 OAuth 授权时签发）。
+// IsEnterpriseSession 报告当前凭证是否处于「企业上下文」。
 //
-// 为什么单独一站：企业切换会话与真企业版的上游表现**不同**（实测 2026-10-12，
-// 同一时刻与个人号 A/B 对照）——成长任务列表 / 额度查询 / 领养 Buddy 等**读端点
-// 与直连 API 照常**，但 /v2/report 行为事件**返回 200 却被静默丢弃**（15 个成长
-// 任务全部 0/x，重跑并 90s 内逐 15s 回读进度从不跳动），连登 / 签到同样无效。
-// 即「读得见、记不上账」：不跳过则队列每轮白跑全部任务（含真实对话配额）且
-// 无任何报错。因此行为类任务（活跃上报 / 连登 / 旅行 / 夜猫子 / 成长任务执行）
-// 的门控应使用本方法；签到与任务列表扫描不在此列（签到失败是显式报错，
-// 列表扫描实测可用）。额度查询 / 选号 / 保活照常（按 IsEnterprise 口径）。
+// 判定口径（2026-10-24 修正）：**只看 enterpriseId**（IsEnterprise），不看 JWT 的
+// token_source 声明。
 //
-// 每次现解码 JWT 而非 Parse 时缓存：RefreshToken 会整体换发 token，
-// 企业切换状态可能随重新授权翻转，缓存会读到过期形态。解码成本仅一次
-// base64 + 小 JSON（每调度轮每账号数次），可忽略。
+// 为什么改：原实现把 token_source=enterprise_switch 也判为企业上下文，理由是
+// 「浏览器停在企业空间时完成 OAuth，签出的 token 带该声明，故账号处于企业上下文」。
+// 该推论已被实测推翻（issue #240，misakano7545 的双账号对照）——这个声明记录的只是
+// **本次授权走了企业切换那条流程**，不代表账号当前在企业上下文：
+//
+//   - enterpriseId 非空            → 真企业版，上游无个人成长体系（400 10001 / 403 growth-only）
+//   - enterpriseId 为空 + 该声明   → 仍是个人号，成长任务照常 claimed、/v2/report 照常计分
+//
+// 按 token_source 门控的后果是**误伤正常个人号**：面板「一键完成」直接 422、
+// 调度器跳过五类任务，而账号其实是好的。本机实测的账号即属此类（enterpriseId 空、
+// 且已有 claimed 的历史任务），故收敛为只看 enterpriseId。
+//
+// 取舍：真企业上下文但 enterpriseId 为空的罕见情形会被放过，代价是白跑行为事件
+// （上游返回 200 却静默丢弃、进度停在 0/x，不报错）。这比误伤个人号轻；
+// 若要兜这种情形，应按「连续多轮进度不跳」在上层做自愈检测，而不是在这一层拦。
 func (a *Auth) IsEnterpriseSession() bool {
-	if a.IsEnterprise() {
-		return true
-	}
-	return jwtTokenSource(a.AccessTokenValue()) == "enterprise_switch"
+	return a.IsEnterprise()
 }
 
 // jwtTokenSource 解出 JWT payload 中的 token_source 声明；非 JWT / 解码失败
