@@ -139,7 +139,9 @@ type chatRequestEvent struct {
 }
 
 // ReportChatActivity 向上游发送一条对话活跃上报（chat_request_send）。
-// conversationID 由调用方生成（如 wb2api-<ms>），无需真实会话——服务端不校验一致性。
+// conversationID 由调用方生成（用 session.NewConversationID() 出官方同形的 v4 UUID），
+// 无需真实会话——服务端不校验一致性。**不要再拼项目缩写前缀**：该值直接进上报体，
+// 带 `wb2api-` 之类的前缀等于自证网关身份（issue #239）。
 // requestID 为本轮请求独立标识（多轮同会话上报时各条不同）；空时回落 conversationID。
 // 错误语义与 doJSON 一致：HTTP 非 2xx / 业务 code != 0 → *Error。
 func (c *Client) ReportChatActivity(a *auth.Auth, conversationID, requestID string) error {
