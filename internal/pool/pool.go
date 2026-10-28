@@ -72,9 +72,19 @@ type Pool struct {
 	// randInt64N 仅供测试注入确定性随机源；nil 时用 math/rand/v2 全局源。
 	// 生产代码不应设置此字段。
 	randInt64N func(n int64) int64
-	// persistFails 本地 state.json 连续落盘失败计数（仅 saveLocked 在持锁下读写，无需 atomic）。
-	// 用于落盘失败的日志节流：首败/每 N 次提醒/恢复各打一条，避免磁盘满时刷屏。
-	persistFails int
+	// persistFails 本地 state.json 连续落盘失败计数。落盘已移到锁外（避免持锁写盘
+	// 阻塞选号），故此计数改用 atomic。用于失败日志节流：首败/每 N 次提醒/恢复各打一条。
+	persistFails atomic.Int64
+	// persistMu 串行化锁外的写盘动作。
+	//
+	// 为什么需要：saveLocked 只在 p.mu 下取快照，marshal+写盘+Redis 在锁外做。若两个
+	// goroutine 先后取到快照 S1(旧)、S2(新) 再各自落盘，S2 先写完、S1 后写完，磁盘上
+	// 就留下旧快照。state.json 只在重启恢复时读，后果是恢复出略旧的状态——不致命，
+	// 但属于「把 I/O 移出锁」这一改动的副作用，用一把独立的锁顺序化即可消除。
+	//
+	// 锁序：p.mu 先于 persistMu（释放 p.mu 之后才取 persistMu），writeStateFile 不反向
+	// 取 p.mu，故无环、无死锁。
+	persistMu sync.Mutex
 	// pickSeq 单调递增的选号序号：每次 pick 选中账号时自增并记到 entry.usedSeq，
 	// 为 LRU 兜底/防惊群提供与 time.Now() 精度无关的严格全序（Windows ~0.5ms 精度下
 	// lastUsed 墙钟会全等）。仅 pick 写锁路径读写，无需 atomic。

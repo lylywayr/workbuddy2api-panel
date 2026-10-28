@@ -255,10 +255,15 @@ function rateLimitMeta(row, now) {
   const until = parseAPITime(row && row.until);
   const deadline = resetAt || until;
   const remaining = deadline > now ? Math.round((deadline - now) / 1000) : 0;
-  // issue #241：detail 原为隐式全局赋值，'use strict' 下抛 ReferenceError，
-  // 导致 renderAccounts 的 innerHTML 整体中断、账号池表与模型锁池表双双空白。
-  // 这条路径只在**有账号被模型级限流**时才走到，所以平时自测发现不了；
-  // 必须显式声明，不要改成隐式赋值或挪进分支里。
+  // issue #241：detail 必须在分支外显式声明。app.js 首行是 'use strict'，严格模式下
+  // 给未声明变量赋值抛 ReferenceError（不会建全局变量）。此前挪进 else 分支时丢了
+  // 声明，于是只要账号存在未到期的模型级限流记录（kind='rate_limit'），
+  // renderAccounts() 的 map 回调就抛错 → innerHTML 一次都没写入 → 账号池表体空白；
+  // renderModelLocks() 排在同一 try 块之后，跟着一起空；统计卡片在它之前已赋值完，
+  // 于是呈现「统计正常、表格空白、控制台干净」的假象（轮询 quiet=true 还被静默吞掉）。
+  //
+  // 这条路径只在**有账号被模型级限流**时才走到，平时自测发现不了；不要改成隐式赋值，
+  // 也不要挪进分支里。
   let detail;
   if (kind === 'model_unavailable') {
     return {
@@ -550,7 +555,19 @@ async function loadOverview(quiet) {
     const liveFresh = lastPackages && (Date.now() - lastPackagesAt) < EXP_FRESH_MS;
     if ($('expBox') && !liveFresh) isolated('积分到期提醒', () => renderExpirySnapshot(d));
     if (renderFailures.length) throw new Error(renderFailures.join('；'));
-  } catch (e) { if (!quiet) toast(e.message, 'err'); }
+  } catch (e) {
+    // 渲染类异常不再静默（issue #241）：两表渲染异常曾被 quiet 模式的 catch 完整
+    // 吞掉，表现为「统计正常、表格空白、控制台无报错」，排查全靠反推。渲染异常打
+    // console.error 留痕；网络类错误在轮询时保持静默（抖动无需刷屏，非代码缺陷）。
+    //
+    // 注意：本仓库的渲染隔离把失败汇总成一条普通 Error（消息含「渲染失败」），
+    // 它既不是 ReferenceError 也不是 TypeError。若只按错误类型判定，quiet 轮询下
+    // 这些渲染失败仍会被静默吞掉，等于把 issue #241 的老毛病换个位置还回去。
+    const isRenderErr = e && (e instanceof ReferenceError || e.name === 'TypeError' ||
+      /渲染失败/.test(String(e.message || '')));
+    if (isRenderErr) console.error('[panel] 渲染异常', e);
+    if (!quiet) toast(e.message, 'err');
+  }
 }
 
 $('accBody').addEventListener('click', async ev => {
