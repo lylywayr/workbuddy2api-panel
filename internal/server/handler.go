@@ -407,6 +407,17 @@ func applyModelInfoFields(entry map[string]any, mi upstream.ModelInfo) map[strin
 	if mi.SupportsImages {
 		entry["supports_images"] = true // 多模态能力透出
 	}
+	// input/output_modalities（OpenRouter / Groq 兼容形态）：部分客户端
+	// （OpenMinis 等）只认数组式模态声明，不读 supports_images 布尔——
+	// 缺字段时它们回落「纯文本」默认，用户发图会被本地拒收（「请改用
+	// 支持视觉的模型」），实际模型是多模态。text 必须显式带上：OpenMinis
+	// 对「报了模态」的条目不自动补 text，漏了会把文本输入也判成不支持。
+	if mi.SupportsImages {
+		entry["input_modalities"] = []string{"text", "image"}
+	} else {
+		entry["input_modalities"] = []string{"text"}
+	}
+	entry["output_modalities"] = []string{"text"}
 	if mi.SupportsReasoning {
 		entry["supports_reasoning"] = true
 		if mi.CanDisableThinking {

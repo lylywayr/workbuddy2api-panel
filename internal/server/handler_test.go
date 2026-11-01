@@ -1089,31 +1089,44 @@ func TestModelsDynamic(t *testing.T) {
 	// 断言字段映射：maxInputTokens → context_length，maxOutputTokens → max_output_tokens
 	for _, m := range data {
 		mm := m.(map[string]any)
+		// 注意 id 带 "cn:" 路由前缀：此处曾写裸名导致三个 case 全部失配，
+		// 块内所有字段断言从未执行——字段改名（supported_efforts →
+		// reasoning_supported_efforts）时测试没变红就是这个原因。
 		switch mm["id"] {
-		case "dyn-model-a":
+		case "cn:dyn-model-a":
 			if mm["context_length"].(float64) != 65536 {
 				t.Errorf("dyn-model-a context_length=%v want 65536", mm["context_length"])
 			}
 			if mm["max_output_tokens"].(float64) != 8192 {
 				t.Errorf("dyn-model-a max_output_tokens=%v want 8192", mm["max_output_tokens"])
 			}
-			// reasoning 档位透出：supported_efforts + default_effort
-			efforts, _ := mm["supported_efforts"].([]any)
+			// reasoning 档位透出：reasoning_supported_efforts + reasoning_default_effort
+			efforts, _ := mm["reasoning_supported_efforts"].([]any)
 			if len(efforts) != 3 || efforts[0] != "low" {
-				t.Errorf("dyn-model-a supported_efforts=%v", mm["supported_efforts"])
+				t.Errorf("dyn-model-a reasoning_supported_efforts=%v", mm["reasoning_supported_efforts"])
 			}
-			if mm["default_effort"] != "medium" {
-				t.Errorf("dyn-model-a default_effort=%v want medium", mm["default_effort"])
+			if mm["reasoning_default_effort"] != "medium" {
+				t.Errorf("dyn-model-a reasoning_default_effort=%v want medium", mm["reasoning_default_effort"])
 			}
-		case "dyn-model-b":
+			// 模态声明（OpenRouter/Groq 兼容，OpenMinis 等客户端依赖）：
+			// 未声明 supportsImages 的模型是纯文本；text 必须显式存在。
+			inMods, _ := mm["input_modalities"].([]any)
+			if len(inMods) != 1 || inMods[0] != "text" {
+				t.Errorf("dyn-model-a input_modalities=%v want [text]", mm["input_modalities"])
+			}
+			outMods, _ := mm["output_modalities"].([]any)
+			if len(outMods) != 1 || outMods[0] != "text" {
+				t.Errorf("dyn-model-a output_modalities=%v want [text]", mm["output_modalities"])
+			}
+		case "cn:dyn-model-b":
 			// 上游未返回 reasoning → 两个档位字段都省略（客户端按自身默认）
-			if _, has := mm["supported_efforts"]; has {
-				t.Errorf("dyn-model-b supported_efforts should be omitted, got %v", mm["supported_efforts"])
+			if _, has := mm["reasoning_supported_efforts"]; has {
+				t.Errorf("dyn-model-b reasoning_supported_efforts should be omitted, got %v", mm["reasoning_supported_efforts"])
 			}
-			if _, has := mm["default_effort"]; has {
-				t.Errorf("dyn-model-b default_effort should be omitted")
+			if _, has := mm["reasoning_default_effort"]; has {
+				t.Errorf("dyn-model-b reasoning_default_effort should be omitted")
 			}
-		case "glm-9.9":
+		case "cn:glm-9.9":
 			if mm["context_length"].(float64) != 262144 {
 				t.Errorf("glm-9.9 context_length=%v want 262144", mm["context_length"])
 			}
