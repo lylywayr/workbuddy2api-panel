@@ -367,6 +367,60 @@ func DesktopDesignCanvasSequence(conversationID, requestID string) []DesktopEven
 	)
 }
 
+// DesktopSkillShareSequence 构造「技能详情 → 分享」上报事件链（skill_share 任务判据）。
+//
+// 事件形态逆向自 WorkBuddy 客户端（detail-installed-state 模块的
+// reportShareEntryClick / reportShareChannelAction）：
+//   - skill_share_entry_click：{skillId, skillName, skillType, skillSource,
+//     entry, status, actionSuccessful, tooltip, clickAt}
+//   - skill_share_channel_action：{skillId, skillName, skillType, action,
+//     panelAction, panelType, isSuccessful, cost, id, actionAt}
+//
+// 注意：技能分享在客户端由技能详情页 UI 直接触发，不在对话上下文中——
+// 客户端这些事件的载荷就不带 conversationId / requestId，这里保持同样形态，
+// 不额外注入会话字段。channel_action 报 click 与 success 两档（isSuccessful
+// 对两者均为 true），覆盖判据取浅层或深层动作的两种可能。
+func DesktopSkillShareSequence(skillID, skillName string) []DesktopEvent {
+	now := time.Now().UnixMilli()
+	shareID := clientToken()
+	base := func() map[string]any {
+		return map[string]any{
+			"skillId":     skillID,
+			"skillName":   skillName,
+			"skillType":   "market",
+			"skillSource": "market",
+		}
+	}
+	detail := base()
+	detail["eventCode"] = "skill_detail_show"
+	entryClick := base()
+	entryClick["eventCode"] = "skill_share_entry_click"
+	entryClick["entry"] = "skill_detail"
+	entryClick["status"] = "safe"
+	entryClick["actionSuccessful"] = true
+	entryClick["tooltip"] = ""
+	entryClick["clickAt"] = now
+	channelClick := base()
+	channelClick["eventCode"] = "skill_share_channel_action"
+	channelClick["action"] = "wechat"
+	channelClick["panelAction"] = "click"
+	channelClick["panelType"] = "mini_program_card"
+	channelClick["isSuccessful"] = true
+	channelClick["cost"] = 0
+	channelClick["id"] = shareID
+	channelClick["actionAt"] = now + 1
+	channelSuccess := base()
+	channelSuccess["eventCode"] = "skill_share_channel_action"
+	channelSuccess["action"] = "wechat"
+	channelSuccess["panelAction"] = "success"
+	channelSuccess["panelType"] = "mini_program_card"
+	channelSuccess["isSuccessful"] = true
+	channelSuccess["cost"] = 0
+	channelSuccess["id"] = shareID
+	channelSuccess["actionAt"] = now + 2
+	return []DesktopEvent{DesktopEvent(detail), DesktopEvent(entryClick), DesktopEvent(channelClick), DesktopEvent(channelSuccess)}
+}
+
 // MarketExpert 专家市场的单个专家（/portal/operation-platform/market/expert/list 响应子集）。
 type MarketExpert struct {
 	ExpertID      string `json:"expert_id"`

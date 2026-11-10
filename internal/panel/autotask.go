@@ -125,6 +125,11 @@ var autoActions = []autoAction{
 		run:      runSkillFresh,
 	},
 	{
+		TaskCode: "skill_share",
+		Desc:     "上报技能详情→分享入口→渠道动作事件链（+100 分，2026-11-11 新任务）",
+		run:      runSkillShare,
+	},
+	{
 		TaskCode: "Expert_lighthouse",
 		Desc:     "真实轻量云专家召唤+使用链（chat 链带 has_expert，已验证：两账号点亮）",
 		run:      runExpertLighthouse,
@@ -909,6 +914,21 @@ func runBlackCat(p *Panel, a *auth.Auth) (string, error) {
 		return fmt.Sprintf("完成 %d/%d 次后中断: %v", ok, need, err), nil
 	}
 	return fmt.Sprintf("已完成 %d 次夜间对话并上报", ok), nil
+}
+
+// runSkillShare 完成 skill_share（分享一个技能给好友，+100 分，2026-11-11 上线）。
+//
+// 任务描述：升级到电脑端 5.9.0+，前往「技能」列表点击技能进详情页，通过「分享」
+// 发送给好友。判据事件族逆向自客户端 detail-installed-state 模块：
+// skill_share_entry_click / skill_share_channel_action（panelAction click|success）。
+// 一次上报四连（详情展示 → 入口点击 → 渠道 click → 渠道 success），覆盖判据
+// 取浅层或深层动作的多种可能。技能用真实市场技能（market 来源 → status: safe）。
+func runSkillShare(p *Panel, a *auth.Auth) (string, error) {
+	events := upstream.DesktopSkillShareSequence("skill_2097350077599879168", "润泽小馆·日报撰写")
+	if err := p.cfg.Upstream.ReportDesktopEvent(a, events...); err != nil {
+		return "", fmt.Errorf("技能分享事件上报失败: %w", err)
+	}
+	return "已上报 skill_detail_show + skill_share_entry_click + channel_action(click/success) 事件链", nil
 }
 
 // runSkillFresh 完成 skill_1（尝鲜热门技能）。
