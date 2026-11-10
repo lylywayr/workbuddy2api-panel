@@ -478,9 +478,16 @@ func (s *Scheduler) runBatch(ctx context.Context, kinds []taskKind) {
 func (s *Scheduler) RunCheckinNow() {
 	expiringSoon := s.ExpiringSoonWindow()
 	includeDisabled := s.includeDisabledInTasks()
-	for _, st := range s.cfg.Pool.List() {
+	poolList := s.cfg.Pool.List()
+	for idx, st := range poolList {
 		if st.Disabled && !includeDisabled {
 			continue
+		}
+		// 反风控抖动：真实用户的多个账号不会在同一分钟内先后签到（此前实测
+		// 09:00:00-09:00:12 三连号，时间聚集一眼自动化）。首个账号立即处理，
+		// 后续账号间随机间隔 [3s, 3s+checkinJitterMax)。
+		if idx > 0 {
+			xtime.JitterSleep(3*time.Second, checkinJitterMax)
 		}
 		a := s.cfg.Pool.AuthByUID(st.UID)
 		if a == nil || a.RefreshTokenValue() == "" {

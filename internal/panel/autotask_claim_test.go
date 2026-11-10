@@ -19,6 +19,9 @@ func TestRunAutoAllClaimsDoneButUnclaimed(t *testing.T) {
 	old := reportGap
 	reportGap = 0 // 项间节流在测试里无意义，避免拖慢
 	t.Cleanup(func() { reportGap = old })
+	oldStart, oldItem := accountStartJitter, itemJitterMax
+	accountStartJitter, itemJitterMax = 0, 0 // 反风控抖动同需清零（见 autotask.go）
+	t.Cleanup(func() { accountStartJitter, itemJitterMax = oldStart, oldItem })
 
 	var claims int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

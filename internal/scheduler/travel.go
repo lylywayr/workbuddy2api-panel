@@ -28,6 +28,11 @@ var travelAccountDelay = 800 * time.Millisecond
 // activityAccountDelay 活跃上报账号间限速：与旅行同口径，避免上游风控。测试可置 0。
 var activityAccountDelay = 800 * time.Millisecond
 
+// checkinJitterMax 签到循环账号间随机抖动上限（2026-11-11 反风控铁律落地：
+// 真实多账号不会同分钟内先后签到）。实际间隔 = 3s + rand[0, checkinJitterMax)。
+// 测试可置 0（活动上报测试的同款手法）。
+var checkinJitterMax = 60 * time.Second
+
 // adoptReportGap 领养前置上报后的等待：给上游事件处理留时间再发 buddy/first。
 // 对齐 scripts/task_first_buddy.py 实测的 1.05s 间隔口径。测试可置 0。
 var adoptReportGap = 1050 * time.Millisecond

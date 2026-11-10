@@ -20,6 +20,7 @@ import (
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/xtime"
 )
 
 // ---------------------------------------------------------------------------
@@ -327,6 +328,10 @@ func (p *Panel) runQueueItems(accts []queueAccount, items []queueItem, concurren
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			// 反风控抖动：账号开工错峰。真实用户的多个账号不可能同一秒开始做
+			// 同一任务；队列此前账号同刻并发（08:00:00 三号连亮 skill_share 就是
+			// 这个特征）。随机延迟 [0, accountStartJitter) 再动工。
+			xtime.JitterSleep(0, accountStartJitter)
 			// per-account 互斥：与单任务/一键完成共用一把锁。
 			if !p.tryLockAccount(one.a.UID) {
 				p.queueSet(q, one.a.UID, func(it *queueItem) {
@@ -358,7 +363,9 @@ func (p *Panel) runQueueItems(accts []queueAccount, items []queueItem, concurren
 				} else {
 					p.queueMarkAt(i, "done", msg)
 				}
-				time.Sleep(reportGap) // 项间节流
+				// 项间节流 + 随机抖动：固定 1.05s 间隔的均匀节奏也是机器特征，
+				// 叠加 [0, itemJitterMax) 随机（见 autotask.go 反风控抖动说明）。
+				xtime.JitterSleep(reportGap, itemJitterMax)
 			}
 		}(one)
 	}

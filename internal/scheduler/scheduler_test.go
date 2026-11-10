@@ -16,6 +16,15 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
+// fastCheckinJitter 清零签到账号间抖动（反风控 JitterSleep 的测试开关）：
+// 多账号签到测试里 idx>0 的账号会随机睡 3-63s，不清零会让测试慢且时长随机。
+func fastCheckinJitter(t *testing.T) {
+	t.Helper()
+	old := checkinJitterMax
+	checkinJitterMax = 0
+	t.Cleanup(func() { checkinJitterMax = old })
+}
+
 func TestNextFire(t *testing.T) {
 	loc := time.Local
 	now := time.Date(2026, 7, 27, 10, 0, 0, 0, loc)
@@ -377,6 +386,7 @@ func TestRunKeepaliveSessionDeadResetBySuccess(t *testing.T) {
 }
 
 func TestCheckinErrorDoesNotCrash(t *testing.T) {
+	fastCheckinJitter(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		w.Write([]byte(`boom`))
@@ -525,6 +535,7 @@ func TestRunCheckinSkipsDisabledByDefault(t *testing.T) {
 // TestRunCheckinIncludesDisabledWhenConfigured 开关打开后禁用账号也签到，
 // 但**不被解冻**（ReenableIfCredits 对 disabled 是 no-op），且**仍不参与选号**。
 func TestRunCheckinIncludesDisabledWhenConfigured(t *testing.T) {
+	fastCheckinJitter(t)
 	f := &fakeUpstream{resourceRemain: 500}
 	srv := f.server()
 	defer srv.Close()
@@ -590,6 +601,7 @@ func TestRunBalanceRefreshIncludesDisabledUpdatesCredits(t *testing.T) {
 
 // TestSetIncludeDisabledInTasksHot setter 热更新立即生效（面板保存配置走这条路径）。
 func TestSetIncludeDisabledInTasksHot(t *testing.T) {
+	fastCheckinJitter(t)
 	f := &fakeUpstream{resourceRemain: 500}
 	srv := f.server()
 	defer srv.Close()
@@ -615,6 +627,7 @@ func TestSetIncludeDisabledInTasksHot(t *testing.T) {
 // 的存在理由：轮换用法下让位的号仍需养着，否则积分断档、token 过期要重新登录。
 // 注意：**不开** IncludeDisabledInTasks——paused 不依赖那个全局开关。
 func TestPausedAccountStillRunsKeepaliveTasks(t *testing.T) {
+	fastCheckinJitter(t)
 	f := &fakeUpstream{resourceRemain: 700}
 	srv := f.server()
 	defer srv.Close()

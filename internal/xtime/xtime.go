@@ -7,6 +7,7 @@ package xtime
 
 import (
 	"context"
+	"math/rand/v2"
 	"time"
 )
 
@@ -24,4 +25,17 @@ func SleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// JitterSleep 睡 [base, base+max) 的随机时长，模拟真实用户操作的不均匀节奏。
+// 反风控用途：固定间隔 / 同刻并发是多账号自动化的时间分布特征，叠加随机
+// 抖动后（如账号开工错峰、项间节流叠加、签到账号间隔）行为更接近真人。
+// max<=0 时只睡 base（与无抖动旧行为一致，便于测试清零）。不可取消——
+// 需要可取消语义的场景用 SleepCtx 自行组合。
+func JitterSleep(base, max time.Duration) {
+	if max <= 0 {
+		time.Sleep(base)
+		return
+	}
+	time.Sleep(base + time.Duration(rand.Int64N(int64(max))))
 }

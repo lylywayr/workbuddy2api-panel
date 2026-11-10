@@ -759,6 +759,18 @@ func taskProgressText(t *upstream.Task) string {
 // reportGap 连续上报之间的间隔（对齐上游脚本实测的 1.05s 口径，避免风控）。
 var reportGap = 1050 * time.Millisecond
 
+// 反风控抖动（2026-11-11 用户定铁律「必须模拟真实客户端」的落地）：
+// 真实用户的多账号行为不可能秒级聚集，但队列此前是「账号同刻并发、项间
+// 恒定 1.05s」——时间分布特征一眼机器。抖动实现在 internal/xtime.JitterSleep
+// （scheduler 的签到抖动同源），panel 侧两个参数：
+//   - accountStartJitter：队列每账号开工前随机延迟（错峰开工）
+//   - itemJitterMax：队列项间在 reportGap 基础上叠加随机
+// 测试可清零（autotask_claim_test.go 已清 reportGap，同处补清抖动）。
+var (
+	accountStartJitter = 90 * time.Second
+	itemJitterMax      = 25 * time.Second
+)
+
 // runChat5 补足 chat_5 的进度：按差额上报 chat_request_send。
 func runChat5(p *Panel, a *auth.Auth) (string, error) {
 	t, err := p.taskByCode(a, "chat_5")
@@ -916,19 +928,44 @@ func runBlackCat(p *Panel, a *auth.Auth) (string, error) {
 	return fmt.Sprintf("已完成 %d 次夜间对话并上报", ok), nil
 }
 
+// skillSharePool 技能分享用的真实市场技能池。全部经
+// POST /portal/operation-platform/market/skill/get-by-ids 实机验证为
+// published 状态（2026-11-11，健康号 3481ea29）。反风控：池内随机取，
+// 避免「所有账号分享同一技能」的载荷聚集特征。
+var skillSharePool = [][2]string{
+	{"skill_2097350077599879168", "daily-report"},   // 润泽小馆·日报撰写（首发验证）
+	{"skill_2053082606165762048", "pptx-generator"}, // v2.0.3
+	{"skill_2053082396193849344", "minimax-docx"},
+	{"skill_2053082401071824896", "minimax-xlsx"},
+	{"skill_2053081347554050048", "apple-notes"},
+	{"skill_2053082097175687168", "humanizer"}, // v2.1.1
+	{"skill_2053082516611272704", "open-novel-writing"},
+	{"skill_2053082248175816704", "khazix-writer"},
+	{"skill_2053084540171059200", "marketing-skills"},
+}
+
+// skillShareChannels 分享渠道随机池（客户端分享面板的常用渠道，
+// panelType 映射见 upstream.skillSharePanelTypes）。
+var skillShareChannels = []string{"wechat", "qrcode", "link", "moments"}
+
 // runSkillShare 完成 skill_share（分享一个技能给好友，+100 分，2026-11-11 上线）。
 //
 // 任务描述：升级到电脑端 5.9.0+，前往「技能」列表点击技能进详情页，通过「分享」
 // 发送给好友。判据事件族逆向自客户端 detail-installed-state 模块：
 // skill_share_entry_click / skill_share_channel_action（panelAction click|success）。
 // 一次上报四连（详情展示 → 入口点击 → 渠道 click → 渠道 success），覆盖判据
-// 取浅层或深层动作的多种可能。技能用真实市场技能（market 来源 → status: safe）。
+// 取浅层或深层动作的多种可能。
+//
+// 反风控（2026-11-11 铁律）：技能从真实市场池随机取、渠道随机取——真实用户
+// 各自分享不同技能、走不同渠道，固定「同技能同渠道」是载荷聚集特征。
 func runSkillShare(p *Panel, a *auth.Auth) (string, error) {
-	events := upstream.DesktopSkillShareSequence("skill_2097350077599879168", "润泽小馆·日报撰写")
+	skill := skillSharePool[rand.IntN(len(skillSharePool))]
+	channel := skillShareChannels[rand.IntN(len(skillShareChannels))]
+	events := upstream.DesktopSkillShareSequence(skill[0], skill[1], channel)
 	if err := p.cfg.Upstream.ReportDesktopEvent(a, events...); err != nil {
 		return "", fmt.Errorf("技能分享事件上报失败: %w", err)
 	}
-	return "已上报 skill_detail_show + skill_share_entry_click + channel_action(click/success) 事件链", nil
+	return fmt.Sprintf("已上报技能分享事件链（技能=%s 渠道=%s）", skill[1], channel), nil
 }
 
 // runSkillFresh 完成 skill_1（尝鲜热门技能）。

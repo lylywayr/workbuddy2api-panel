@@ -367,6 +367,18 @@ func DesktopDesignCanvasSequence(conversationID, requestID string) []DesktopEven
 	)
 }
 
+// skillSharePanelTypes 分享渠道 → 面板形态映射。逆向自客户端
+// detail-installed-state 模块的 ai 表：{wechat:`mini_program_card`,
+// moments:`mini_program_card`, qrcode:`qrcode_image`, link:`clipboard`,
+// browser:`external_browser`}`。
+var skillSharePanelTypes = map[string]string{
+	"wechat":  "mini_program_card",
+	"moments": "mini_program_card",
+	"qrcode":  "qrcode_image",
+	"link":    "clipboard",
+	"browser": "external_browser",
+}
+
 // DesktopSkillShareSequence 构造「技能详情 → 分享」上报事件链（skill_share 任务判据）。
 //
 // 事件形态逆向自 WorkBuddy 客户端（detail-installed-state 模块的
@@ -376,11 +388,18 @@ func DesktopDesignCanvasSequence(conversationID, requestID string) []DesktopEven
 //   - skill_share_channel_action：{skillId, skillName, skillType, action,
 //     panelAction, panelType, isSuccessful, cost, id, actionAt}
 //
+// channel 为分享渠道（wechat/moments/qrcode/link/browser），panelType 由
+// skillSharePanelTypes 查表，未知渠道回落 mini_program_card。
+//
 // 注意：技能分享在客户端由技能详情页 UI 直接触发，不在对话上下文中——
 // 客户端这些事件的载荷就不带 conversationId / requestId，这里保持同样形态，
 // 不额外注入会话字段。channel_action 报 click 与 success 两档（isSuccessful
 // 对两者均为 true），覆盖判据取浅层或深层动作的两种可能。
-func DesktopSkillShareSequence(skillID, skillName string) []DesktopEvent {
+func DesktopSkillShareSequence(skillID, skillName, channel string) []DesktopEvent {
+	panelType, ok := skillSharePanelTypes[channel]
+	if !ok || panelType == "" {
+		panelType = skillSharePanelTypes["wechat"]
+	}
 	now := time.Now().UnixMilli()
 	shareID := clientToken()
 	base := func() map[string]any {
@@ -402,18 +421,18 @@ func DesktopSkillShareSequence(skillID, skillName string) []DesktopEvent {
 	entryClick["clickAt"] = now
 	channelClick := base()
 	channelClick["eventCode"] = "skill_share_channel_action"
-	channelClick["action"] = "wechat"
+	channelClick["action"] = channel
 	channelClick["panelAction"] = "click"
-	channelClick["panelType"] = "mini_program_card"
+	channelClick["panelType"] = panelType
 	channelClick["isSuccessful"] = true
 	channelClick["cost"] = 0
 	channelClick["id"] = shareID
 	channelClick["actionAt"] = now + 1
 	channelSuccess := base()
 	channelSuccess["eventCode"] = "skill_share_channel_action"
-	channelSuccess["action"] = "wechat"
+	channelSuccess["action"] = channel
 	channelSuccess["panelAction"] = "success"
-	channelSuccess["panelType"] = "mini_program_card"
+	channelSuccess["panelType"] = panelType
 	channelSuccess["isSuccessful"] = true
 	channelSuccess["cost"] = 0
 	channelSuccess["id"] = shareID
